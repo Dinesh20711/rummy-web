@@ -4,7 +4,7 @@ import { toast, ToastContainer } from "react-toastify";
 import { io } from "socket.io-client";
 import Bg from "./excel1.png";
 
-const socket = io("http://192.168.0.74:80");
+const socket = io("http://localhost:80");
 
 // ================= TYPES =================
 
@@ -187,7 +187,10 @@ function App() {
   const [_deckCount, setDeckCount] = useState<number>(0);
 
   const [gameStarted, setGameStarted] = useState<boolean>(false);
+  const [completionScreenshot, setCompletionScreenshot] = useState<string | null>(null);
   const [rummyRequest, setRummyRequest] = useState<RummyRequest | null>(null);
+  const [drawAction, setDrawAction] = useState<{ from: "deck" | "open"; card: Card | null } | null>(null);
+  const drawActionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const isMyTurn = socket.id === currentPlayerId;
   const isHost = socket.id === hostId;
@@ -250,17 +253,17 @@ function App() {
     socket.on("gameCompleted", (data) => {
       toast.info("Game Completed! " + data.winnerName + " wins!");
       if (data.screenshot) {
-        const img: any = document.createElement("img");
-        img.src = data.screenshot;
-        img.style.width = "500px";
-        img.style.position = "absolute";
-        img.style.top = "0px";
-        img.style.right = "0px";
-        document.body.appendChild(img);
+        setCompletionScreenshot(data.screenshot);
       }
 
       setGameStarted(false);
       setJoker(null);
+    });
+
+    socket.on("cardDrawn", (data: { from: "deck" | "open"; card: Card | null }) => {
+      if (drawActionTimerRef.current) clearTimeout(drawActionTimerRef.current);
+      setDrawAction({ from: data.from, card: data.card });
+      drawActionTimerRef.current = setTimeout(() => setDrawAction(null), 2000);
     });
 
     socket.on("error", (err: string) => toast.error(err));
@@ -273,6 +276,7 @@ function App() {
       socket.off("rummyApproved");
       socket.off("rummyRejected");
       socket.off("gameCompleted");
+      socket.off("cardDrawn");
       socket.off("error");
     };
   }, []);
@@ -481,18 +485,31 @@ function App() {
                 <button
                   onClick={drawFromDeck}
                   disabled={!isMyTurn}
-                  style={styles.deck}
+                  style={{
+                    ...styles.deck,
+                    outline: drawAction?.from === "deck" ? "3px solid green" : "none",
+                  }}
                 >
                   🂠
                 </button>
 
-                <button
-                  style={styles.card}
-                  onClick={pickOpenCard}
-                  disabled={!isMyTurn}
-                >
-                  {openCard ? openCard.value + openCard.suit : ""}
-                </button>
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
+                  {drawAction?.from === "open" && drawAction.card && (
+                    <div style={{ ...styles.card, color: "gray", opacity: 0.6, fontSize: 14 }}>
+                      {drawAction.card.value}{drawAction.card.suit}
+                    </div>
+                  )}
+                  <button
+                    style={{
+                      ...styles.card,
+                      outline: drawAction?.from === "open" ? "3px solid green" : "none",
+                    }}
+                    onClick={pickOpenCard}
+                    disabled={!isMyTurn}
+                  >
+                    {openCard ? openCard.value + openCard.suit : ""}
+                  </button>
+                </div>
               </div>
               {isMyTurn && (
                 <div style={{ display: "flex", gap: 5 }}>
@@ -541,7 +558,28 @@ function App() {
         </div>
       </div>
       <button onClick={() => socket.emit("restartServer")}>Restart</button>
-      <ToastContainer />
+
+      {completionScreenshot && (
+        <div
+          style={{
+            position: "absolute",
+            top: 0,
+            right: 0,
+            width: 500,
+            zIndex: 1000,
+          }}
+        >
+          <img src={completionScreenshot} style={{ width: "100%" }} />
+          <button
+            style={{ width: "100%", padding: 8, cursor: "pointer" }}
+            onClick={() => setCompletionScreenshot(null)}
+          >
+            OK
+          </button>
+        </div>
+      )}
+
+      <ToastContainer  autoClose={2000}/>
     </div>
   );
 }
